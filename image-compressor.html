@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shopify Image Compressor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f4f0; --bg3: #ebebeb;
+    --text: #1a1a18; --text2: #6b6a66; --text3: #9a9994;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --green: #1D9E75; --green-bg: #E1F5EE; --green-text: #0F6E56;
+    --red-bg: #FCEBEB; --red-text: #A32D2D;
+    --blue-bg: #E6F1FB; --blue-text: #185FA5;
+    --radius: 10px; --radius-sm: 7px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1a; --bg2: #252523; --bg3: #2e2e2b;
+      --text: #f0efe9; --text2: #9a9994; --text3: #6b6a66;
+      --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.2);
+      --green-bg: #04342C; --green-text: #9FE1CB;
+      --red-bg: #501313; --red-text: #F7C1C1;
+      --blue-bg: #042C53; --blue-text: #B5D4F4;
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg3); color: var(--text); min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 2rem 1rem; }
+  .app { width: 100%; max-width: 720px; }
+  header { margin-bottom: 1.5rem; }
+  header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
+  .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  #drop-zone {
+    border: 1.5px dashed var(--border2);
+    border-radius: var(--radius);
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    background: var(--bg2);
+  }
+  #drop-zone.drag-over { background: var(--blue-bg); border-color: #378ADD; }
+  #drop-zone svg { width: 36px; height: 36px; color: var(--text2); margin-bottom: 10px; }
+  #drop-zone strong { font-size: 15px; font-weight: 500; display: block; }
+  #drop-zone p { font-size: 13px; color: var(--text2); margin-top: 5px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 1.25rem 0; }
+  .ctrl label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px; }
+  .ctrl select, .ctrl input[type=range] { width: 100%; }
+  .ctrl select { padding: 7px 10px; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: var(--bg2); color: var(--text); font-size: 13px; cursor: pointer; }
+  .ctrl .val { font-size: 12px; color: var(--text); font-weight: 500; margin-top: 3px; display: block; }
+  input[type=range] { -webkit-appearance: none; height: 4px; background: var(--bg3); border-radius: 2px; outline: none; cursor: pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--text); cursor: pointer; }
+  .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem; }
+  .stat { background: var(--bg2); border-radius: var(--radius-sm); padding: 10px 12px; }
+  .stat .n { font-size: 20px; font-weight: 600; }
+  .stat .l { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  #file-list { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; }
+  .file-row { display: grid; grid-template-columns: 44px 1fr auto auto; align-items: center; gap: 10px; background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+  .file-row img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; background: var(--bg2); }
+  .file-info .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .file-info .meta { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .progress-bar { height: 3px; background: var(--bg3); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.3s; }
+  .badge { font-size: 11px; padding: 3px 9px; border-radius: 99px; white-space: nowrap; font-weight: 500; }
+  .badge.saving { background: var(--green-bg); color: var(--green-text); }
+  .badge.pending { background: var(--bg2); color: var(--text2); }
+  .badge.error { background: var(--red-bg); color: var(--red-text); }
+  .btn-dl { font-size: 12px; padding: 5px 11px; cursor: pointer; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: transparent; color: var(--text); display: flex; align-items: center; gap: 4px; transition: background 0.1s; }
+  .btn-dl:hover:not(:disabled) { background: var(--bg2); }
+  .btn-dl:disabled { opacity: 0.35; cursor: default; }
+  #actions { display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap; }
+  #actions button { padding: 9px 18px; cursor: pointer; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: transparent; color: var(--text); font-size: 14px; display: flex; align-items: center; gap: 6px; transition: background 0.1s; }
+  #actions button:hover:not(:disabled) { background: var(--bg2); }
+  #btn-compress { background: var(--text) !important; color: var(--bg) !important; border-color: transparent !important; font-weight: 600; }
+  #btn-compress:hover:not(:disabled) { opacity: 0.88; background: var(--text) !important; }
+  #btn-compress:disabled { opacity: 0.4; cursor: default; }
+  #btn-dl-all:disabled { opacity: 0.4; cursor: default; }
+  .empty { text-align: center; color: var(--text2); font-size: 13px; padding: 2rem; }
+  .tip { font-size: 12px; color: var(--text2); margin-top: 0.75rem; line-height: 1.65; background: var(--blue-bg); color: var(--blue-text); padding: 10px 14px; border-radius: var(--radius-sm); }
+  @media (max-width: 500px) {
+    .stats-bar { grid-template-columns: repeat(2, 1fr); }
+    .file-info .name { max-width: 140px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🛍️ Shopify Image Compressor</h1>
+    <p>Free · unlimited · 100% private — images never leave your device</p>
+  </header>
+
+  <div id="drop-zone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto 10px; display:block"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
+    <strong>Drop product images here</strong>
+    <p>or click to browse — JPG, PNG, WebP, GIF · batch supported</p>
+    <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+  </div>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>Output format</label>
+      <select id="fmt">
+        <option value="webp">WebP (best for Shopify)</option>
+        <option value="jpeg">JPEG</option>
+        <option value="png">PNG</option>
+      </select>
+    </div>
+    <div class="ctrl">
+      <label>Quality — <span id="q-val">85%</span></label>
+      <input type="range" id="quality" min="60" max="100" value="85" step="1">
+    </div>
+    <div class="ctrl">
+      <label>Max width — <span id="maxw-val">2000px</span></label>
+      <input type="range" id="maxw" min="0" max="3000" step="100" value="2000">
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="n" id="s-count">0</div><div class="l">images loaded</div></div>
+    <div class="stat"><div class="n" id="s-orig">—</div><div class="l">original size</div></div>
+    <div class="stat"><div class="n" id="s-comp">—</div><div class="l">compressed size</div></div>
+    <div class="stat"><div class="n" id="s-save">—</div><div class="l">space saved</div></div>
+  </div>
+
+  <div class="card">
+    <div id="file-list"><div class="empty">No images yet — drop files above to get started</div></div>
+  </div>
+
+  <div id="actions">
+    <button id="btn-compress" disabled>⚡ Compress all</button>
+    <button id="btn-dl-all" disabled>⬇ Download all as ZIP</button>
+    <button id="btn-clear">🗑 Clear</button>
+  </div>
+
+  <p class="tip">🔒 Everything runs offline in your browser — no server, no account, no limits. Recommended settings for Shopify: WebP · 85% quality · 2000px max width. Saves 30–50% file size vs JPG/PNG.</p>
+</div>
+
+<script>
+const drop = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fmtSel = document.getElementById('fmt');
+const qualSlider = document.getElementById('quality');
+const qualVal = document.getElementById('q-val');
+const maxwSlider = document.getElementById('maxw');
+const maxwVal = document.getElementById('maxw-val');
+const fileList = document.getElementById('file-list');
+const btnCompress = document.getElementById('btn-compress');
+const btnDlAll = document.getElementById('btn-dl-all');
+const btnClear = document.getElementById('btn-clear');
+
+let files = [];
+
+qualSlider.oninput = () => qualVal.textContent = qualSlider.value + '%';
+maxwSlider.oninput = () => {
+  const v = parseInt(maxwSlider.value);
+  maxwVal.textContent = v === 0 ? 'original' : v + 'px';
+};
+
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag-over'); };
+drop.ondragleave = () => drop.classList.remove('drag-over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('drag-over'); addFiles(e.dataTransfer.files); };
+fileInput.onchange = () => addFiles(fileInput.files);
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(2) + ' MB';
+}
+
+function addFiles(newFiles) {
+  Array.from(newFiles).forEach(f => {
+    if (!f.type.startsWith('image/')) return;
+    files.push({ file: f, id: Math.random().toString(36).slice(2), status: 'pending', origSize: f.size, compBlob: null, compSize: null });
+  });
+  renderList(); updateStats();
+  btnCompress.disabled = files.length === 0;
+}
+
+function renderList() {
+  if (files.length === 0) {
+    fileList.innerHTML = '<div class="empty">No images yet — drop files above to get started</div>';
+    return;
+  }
+  fileList.innerHTML = '';
+  files.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const thumb = document.createElement('img');
+    thumb.src = URL.createObjectURL(item.file);
+    thumb.alt = '';
+    const info = document.createElement('div');
+    info.className = 'file-info';
+    const savingPct = item.compSize ? Math.round((1 - item.compSize / item.origSize) * 100) : null;
+    info.innerHTML = `<div class="name">${item.file.name}</div><div class="meta">${fmtBytes(item.origSize)}${item.compSize ? ' → ' + fmtBytes(item.compSize) : ''}</div>`;
+    if (item.compSize) {
+      const bar = document.createElement('div');
+      bar.className = 'progress-bar';
+      bar.innerHTML = `<div class="progress-fill" style="width:${Math.max(5, 100 - Math.abs(savingPct))}%"></div>`;
+      info.appendChild(bar);
+    }
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + (item.status === 'done' ? 'saving' : item.status === 'error' ? 'error' : 'pending');
+    badge.textContent = item.status === 'done' ? (savingPct > 0 ? '−' + savingPct + '%' : '+' + Math.abs(savingPct) + '%') : item.status === 'error' ? 'error' : 'pending';
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'btn-dl';
+    dlBtn.disabled = item.status !== 'done';
+    dlBtn.innerHTML = '⬇';
+    dlBtn.title = 'Download this image';
+    dlBtn.onclick = () => downloadOne(item);
+    row.append(thumb, info, badge, dlBtn);
+    fileList.appendChild(row);
+  });
+}
+
+function updateStats() {
+  document.getElementById('s-count').textContent = files.length;
+  const done = files.filter(f => f.status === 'done');
+  if (done.length === 0) {
+    document.getElementById('s-orig').textContent = files.length ? fmtBytes(files.reduce((a, f) => a + f.origSize, 0)) : '—';
+    document.getElementById('s-comp').textContent = '—';
+    document.getElementById('s-save').textContent = '—';
+    return;
+  }
+  const origTotal = done.reduce((a, f) => a + f.origSize, 0);
+  const compTotal = done.reduce((a, f) => a + f.compSize, 0);
+  const saved = origTotal - compTotal;
+  document.getElementById('s-orig').textContent = fmtBytes(origTotal);
+  document.getElementById('s-comp').textContent = fmtBytes(compTotal);
+  document.getElementById('s-save').textContent = saved > 0 ? '−' + fmtBytes(saved) : '0 B';
+}
+
+async function compressImage(item) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = parseInt(maxwSlider.value);
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (maxW > 0 && w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const mimeMap = { webp: 'image/webp', jpeg: 'image/jpeg', png: 'image/png' };
+      const mime = mimeMap[fmtSel.value];
+      const q = parseInt(qualSlider.value) / 100;
+      canvas.toBlob(blob => {
+        if (!blob) { item.status = 'error'; resolve(); return; }
+        item.compBlob = blob; item.compSize = blob.size; item.status = 'done';
+        resolve();
+      }, mime, mime === 'image/png' ? undefined : q);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => { item.status = 'error'; resolve(); };
+    img.src = URL.createObjectURL(item.file);
+  });
+}
+
+btnCompress.onclick = async () => {
+  btnCompress.disabled = true;
+  btnCompress.textContent = '⏳ Compressing…';
+  for (const item of files) {
+    item.status = 'pending'; item.compBlob = null; item.compSize = null;
+    await compressImage(item);
+    renderList(); updateStats();
+  }
+  btnCompress.textContent = '⚡ Compress all';
+  btnCompress.disabled = false;
+  const anyDone = files.some(f => f.status === 'done');
+  btnDlAll.disabled = !anyDone;
+};
+
+function ext(fmt) { return fmt === 'jpeg' ? 'jpg' : fmt; }
+
+function downloadOne(item) {
+  const a = document.createElement('a');
+  const base = item.file.name.replace(/\.[^.]+$/, '');
+  a.download = base + '_compressed.' + ext(fmtSel.value);
+  a.href = URL.createObjectURL(item.compBlob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+btnDlAll.onclick = async () => {
+  const done = files.filter(f => f.status === 'done');
+  if (!done.length) return;
+  btnDlAll.disabled = true;
+  btnDlAll.textContent = '⏳ Zipping…';
+  const zip = new JSZip();
+  done.forEach(item => {
+    const base = item.file.name.replace(/\.[^.]+$/, '');
+    zip.file(base + '_compressed.' + ext(fmtSel.value), item.compBlob);
+  });
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.download = 'shopify_compressed_images.zip';
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  btnDlAll.textContent = '⬇ Download all as ZIP';
+  btnDlAll.disabled = false;
+};
+
+btnClear.onclick = () => {
+  files = []; fileInput.value = '';
+  btnCompress.disabled = true; btnDlAll.disabled = true;
+  renderList(); updateStats();
+};
+</script>
+</body>
+</html>
